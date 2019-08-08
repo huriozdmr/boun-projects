@@ -1,0 +1,399 @@
+Main.c
+- changeLeftDirection
+    This function changes the rotation of the wheels on the left side. 
+    For doing that, it just updates IN1, IN2 values 
+    for different direction parameters.
+    ```
+    IF (direction == FORWARD)
+        THEN
+        IN1.PIN <- 0
+        IN2.PIN <- 1
+    ELSE IF (direction == BACKWARD)
+        THEN
+        IN1.PIN <- 0
+        IN2.PIN <- 1
+    ```
+- changeRightDirection
+    This function changes the rotation of the wheels on the left side. 
+    For doing that, it just updates IN1, IN2 
+    values for different direction parameters.
+    IF (direction == FORWARD)
+        THEN
+        IN3.PIN <- 0
+        IN4.PIN <- 1
+    ELSE IF (direction == BACKWARD)
+        THEN
+        IN3.PIN <- 0
+        IN4.PIN <- 1
+- changeDirection
+    This function changes the rotation of the car altogether 
+    for point turns, handles stopping and turns on/off leds
+    IF (direction == FORWARD)
+        THEN
+        // Left wheels forward
+        IN1.PIN <- 0
+        IN2.PIN <- 1
+        // Right wheels forward
+        IN3.PIN <- 0
+        IN4.PIN <- 1
+    ELSE IF (direction == BACKWARD)
+        THEN
+        // Left wheels backward
+        IN1.PIN <- 1
+        IN2.PIN <- 0
+        // Right wheels backward
+        IN3.PIN <- 1
+        IN4.PIN <- 0
+    ELSE IF (direction == LEFT)
+        THEN
+        // Left wheels backward
+        IN1.PIN <- 1
+        IN2.PIN <- 0
+        // Right wheels forward
+        IN3.PIN <- 0
+        IN4.PIN <- 1
+    ELSE IF (direction == RIGHT)
+        THEN
+        // Left wheels forward
+        IN1.PIN <- 0
+        IN2.PIN <- 1
+        // Right wheels backward
+        IN3.PIN <- 1
+        IN4.PIN <- 0
+    ELSE IF (direction == STOP)
+        THEN
+        // Stop
+        IN1.PIN <- 0
+        IN2.PIN <- 0
+        IN3.PIN <- 0
+        IN4.PIN <- 0
+- init
+    This function initializes Joystick, Ultrasonic sensor, 
+    UART, External push button interrupt, ADC and 
+    PWM by calling their init functions.
+    ```
+    Joystick_Init();
+	Ultrasonic_Trigger_Timer_Init();
+	Ultrasonic_Capture_Timer_Init();
+	Ulrasonic_Start_Trigger();
+	Serial_Init();
+	External_Init();
+	ADC_Init();
+	PWM_Init();
+
+    Init direction of IN1, IN2, IN3 and IN4
+    Init direction of LED pins
+    Set current direction to STOP
+    ```
+- syncMotorWithLight
+    This function synchronizes motor with the data from the 
+    light sensors. Following the path logic is handled in here
+    ```
+    difference <- ldr1Value - ldr2Value
+    turnRight <- difference > 0 // Means left has more light than right
+    absDiff <- ABS(difference) // Absoulte value of difference
+    IF (!escaping && turnRight)
+        THEN
+        IF (absDiff > 50)
+            THEN
+            leftSpeedMultiplier <- 1
+            rightSpeedMultiplier <- 0.7 // Softer point turn
+            changeRightDirection(BACKWARD)
+            changeLeftDirection(FORWARD) // Point turn
+        ELSE
+            leftSpeedMultiplier <- 1
+            rightSpeedMultiplier <- 1
+            changeDirection(FORWARD)
+    ELSE IF (!escaping)
+        THEN
+        IF (absDiff > 50)
+            THEN
+            leftSpeedMultiplier <- 1
+            rightSpeedMultiplier <- 0.7
+            changeLeftDirection(BACKWARD)
+            changeRightDirection(FORWARD)
+        ELSE
+            leftSpeedMultiplier <- 1
+            rightSpeedMultiplier <- 1
+    ```
+- updateMotorSpeed
+    This function updates motor speed with respect 
+    to trimpot value and ldr values
+    IF NOT (inManualMode)
+        THEN
+        syncMotorWithLight(ldr1, ldr2)
+
+    robotSpeed = (trimPotValue * 100) / 1000
+    IF (direction != STOP)
+        THEN
+        PWM_Write(leftSpeedMultiplier * robotSpeed, 
+        rightSpeedMultiplier * robotSpeed) // Updates speeds of the two motors
+- update
+    This function executes lifecycle of the motor;
+    starts ADC conversion, updates direction value 
+    and change direction with respect to ultrasonic 
+    sensor and joystic pressed states; updates motor speed
+    ```
+    ADC_Start()
+    IF (shouldStop)
+        THEN
+        direction <- STOP
+
+    IF (direction == FORWARD) AND 
+    (ultrasonicSensorDistance <= OBSTACLE_DISTANCE)
+        THEN
+        direction <- BACKWARD
+        escaping <- 1
+
+    IF (escaping) AND (direction == BACKWARD) AND 
+    (ultrasonicSensorDistance >= OBSTACLE_ESCAPE_DISTANCE)
+        THEN
+        direction <- FORWARD
+        escaping <- 0
+    changeDirection(direction)
+    updateMotorSpeed()
+    if NOT (inManualMode) AND (Joystick_Up_Pressed())
+        THEN
+        shouldStop <- 0
+        shouldStartAuto <- 1
+        direction <- FORWARD
+
+    IF (inManualMode)
+        THEN
+        IF (Joystick_Left_Pressed())
+            THEN
+            shouldStop <- 0
+			direction <- LEFT
+		ELSE IF (Joystick_Right_Pressed())
+            THEN
+            shouldStop <- 0;
+			direction <- RIGHT
+		ELSE IF (Joystick_Up_Pressed())
+            THEN
+            shouldStop <- 0;
+			direction <- FORWARD
+		ELSE IF (Joystick_Down_Pressed())
+            THEN
+            shouldStop <- 0;
+			direction <- BACKWARD
+		ELSE IF (Joystick_Center_Pressed())
+            THEN
+            shouldStop <- 0;
+			direction <- STOP;
+- SysTick_Handler
+    Handles blinking of the leds when turning left/right
+    IF (msTicks == 0)
+        THEN
+        msTicks = 1
+        IF (direction == LEFT)
+            THEN
+            Turn on LED_BACK_LEFT
+            Turn off LED_BACK_RIGHT
+            Turn on LED_FRONT_LEFT
+            Turn off LED_FRONT_RIGHT
+        ELSE IF (direction == RIGHT)
+            THEN
+            Turn off LED_BACK_LEFT
+            Turn on LED_BACK_RIGHT
+            Turn off LED_FRONT_LEFT
+            Turn on LED_FRONT_RIGHT
+    ELSE
+        msTicks = 0
+        Turn off all leds
+- Main
+    Calls init, initializes SysTick interrupt, 
+    goes in infinite update
+    ```
+    init()
+    SysTick_Config(SystemCoreClock / 10)
+
+    while (1) update()
+    ```
+ADC.c
+- normalizeData
+    Gets raw ADC DR and extracts the data
+- ADC_Init
+    Change the functtion value of pins 
+    (LDR1, LDR2, TRIMPOT) to ADC
+    Change the mode value of pins to "inactive"
+    Change the analog/digital mode of pin to Analog
+    Turn on ADC
+    Update CR register to:
+        Use channels 0, 2, 3
+        Set clockdiv
+        Enable burst mode
+        Make it operational
+    Enable interrupts for channels 0, 1, 2
+    Enable nvic irq for ADC
+    Set priority of ADC_IRQn to 5
+    Clear pending ADC_IRQn interrupts
+- ADC_Start
+    Enable nvic irqs for ADC
+- ADC_Stop
+    Disable IRQ for adc
+    Clear pending irq for adc
+- ADC_IRQHandler
+    Gets values of trimPot, lightIntensity1 
+    and lightIntensity2. 
+    Light intensity values 3 - average filtered
+    ```
+    IF (Channel zero has result)
+        THEN
+        trimPotValue <- noramlizeData(ADC->DR[0])
+
+    IF (Channel two has result)
+        THEN
+        lightIntensity11 <- lightIntensity10
+        lightIntensity12 <- lightIntensity11
+        lightIntensity10 <- ADC->DR[2]
+        lightIntensity1 <- avg(lightIntensity11, 
+        lightIntensity12, lightIntensity10)
+
+    IF (Channel three has result)
+        THEN
+        lightIntensity21 <- lightIntensity20
+        lightIntensity22 <- lightIntensity21
+        lightIntensity20 <- ADC->DR[3]
+        lightIntensity2 <- avg(lightIntensity21, 
+        lightIntensity22, lightIntensity20)
+
+    Stops ADC conversion
+    ```
+External.c
+- External_Init
+    Initializes interrupt for push button
+    ```
+    Change the functionality of the push button as EINT0
+    Change the External interrupt mode as Edge Sensitive
+    Enable interrupt for EINT0_IRQn
+    ```
+- EINT0_IRQHandler
+    Handles pressing push button to change mode
+    ```
+    IF (riseHandled)
+        THEN
+        riseHandled <- 0
+    ELSE IF NOT (riseHandled)
+        THEN
+        shouldStop <- 0
+        shouldStartAuto <- 0
+        inManualMode <- !inManualMode
+        riseHandled <- 1
+    Clear interrupt for EINT0
+    ```
+Joystick.c
+- Joystick_Left_Pressed
+- Joystick_Down_Pressed
+- Joystick_Up_Pressed
+- Joystick_Center_Pressed
+- Joystick_Right_Pressed
+
+PWM.c
+- PWM_Init
+    Initializes PWM for two motors
+    ```
+    Open the PWMs in PCONP
+    Set the IOCON value of the speed (ENA, ENB) pins
+    Enable PWM output for pins
+    Reset PWM Timer Counter and the PWM prescale
+    counter on next positive edge of PCLKs
+    Set MR0s of PINs
+    Reset TC when MR0 matches TC
+    Enable PWM Match 0 Latch
+    Enable Counter and PWM and Clear Reset on the PWM
+    ```
+- PWM_Cycle_Rate
+- PWM_Write
+    Updates match register to compare with MR0,
+    sets speeds of the motors
+
+Serial.c
+- Serial_Init
+    Initializes UART with 9600 baudrate; 
+    sets for 8-bit character transfer, 1 
+    stop bits and even parity, enables RBR interrupt
+    ```
+    Enable FIFO for UART0
+    Change register values for 9600 baud 
+    PWM_Cycle_Rate Change LCR register for 8-bit 
+    character transfer, 1 stop bits and Even parity
+    Enable RBR Interrupt
+    Enable NVIC interrupt
+    Clear pending NVIC UART0 handlers
+    ```
+- Serial_WriteData
+    Writes one char to UART
+    ```
+    Wait until Transmit Holding Register become empty
+    Write data to Transmit Holding Register
+    ```
+- Serial_Write
+    Writes string to UART
+    ```
+    For each character in data, write that character to UART
+    ```
+- UART0_IRQHandler
+    Handles UART0 RBR interrupt; listens for *, # and 66
+    ```
+    oldData <- data
+    data <- Serial_UART->RBR
+    IF NOT (inManualMode) AND data == '*'
+        THEN
+        Set inManualMode to 1
+        Set shouldStop to 1
+        Serial write "MANUEL"
+    ELSE IF (data == '6' AND oldData == '6' AND NOT inManualMode)
+        THEN
+        Set shouldStop to 0
+        Set shouldStartAuto to 1
+    ELSE IF (data == '#' AND inManualMode)
+        THEN
+        Set inManualMode to 0
+        Set shouldStop to 1
+        Serial write "AUTO"
+    ```
+Timer.c
+- Timer_Init
+
+Ultrasonic.c
+- Ultrasonic_Trigger_Timer_Init
+    Initializes Trigger Timer of the Ultrasonic sensor
+- Ultrasonic_Capture_Timer_Init
+    Initializes Capture Timer of the Ultrasonic sensor
+- Ultrasonic_Start_Trigger
+    Start trigger by Enabling interrupts for Timer2 MR3 
+
+    register and enable Timer2 counter 
+    and prescale counter for counting
+- TIMER2_IRQHandler
+    Initializes 1 measurement of the ultrasonic sensor
+    ```
+    IF isUltrasonicSensorTriggerEnded == 0
+        THEN
+        Change MR3 Register value for suggested waiting
+        Set isUltrasonicSensorTriggerEnded to 1
+        Set ultrasonicSensorEdgeCount to 0
+        Clear pending interrupts for TIMER3
+        Enable TIMER3 interrupts from NVIC
+    ELSE
+        Change MR3 register for 10ms waiting
+        Set isUltrasonicSensorTriggerEnded to 1
+    Clear IR register flag for interrupt
+    ```
+- TIMER3_IRQHandler
+    Makes the mesurement of the distance
+    ```
+    IF (ultrasonicEdgeCount == 0)
+        THEN
+        ultrasonicSensorRisingTime <- TIMER3->CR1
+        Set ultrasonicSensorEdgeCount to 1
+        Clear pending interrupts for TIMER3
+    ELSE IF (ultrasonicSensorEdgeCount == 1)
+        THEN
+        ultrasonicSensorFallingTime <- TIMER3->CR1
+        Set ultrasonicSensorEdgeCount to 2
+        Set ultrasonicSensorDuration and Distance
+        Clear pending interrupts for TIMER3
+        Disable interrupts for interrupt 3
+    Clear corresponding interrupt flag
+    ```
